@@ -216,7 +216,7 @@ type GlfwWindow struct {
 }
 
 // Init initializes the GlfwWindow singleton with the specified width, height, and title.
-func Init(width, height int, title string) error {
+func InitPos(width, height int, xpos int, ypos int, title string) error {
 
 	// Panic if already created
 	if win != nil {
@@ -231,6 +231,178 @@ func Init(width, height int, title string) error {
 	w := new(GlfwWindow)
 	w.Dispatcher.Initialize()
 	var err error
+
+	// Initialize GLFW
+	err = glfw.Init()
+	if err != nil {
+		return err
+	}
+
+	// Set window hints
+	glfw.WindowHint(glfw.ContextVersionMajor, 3)
+	glfw.WindowHint(glfw.ContextVersionMinor, 3)
+	glfw.WindowHint(glfw.OpenGLProfile, glfw.OpenGLCoreProfile)
+	glfw.WindowHint(glfw.Samples, 8)
+	// Set OpenGL forward compatible context only for OSX because it is required for OSX.
+	// When this is set, glLineWidth(width) only accepts width=1.0 and generates an error
+	// for any other values although the spec says it should ignore unsupported widths
+	// and generate an error only when width <= 0.
+	if runtime.GOOS == "darwin" {
+		glfw.WindowHint(glfw.OpenGLForwardCompatible, glfw.True)
+	}
+
+	glfw.WindowHint(glfw.Visible, glfw.False)
+
+	// Create window and set it as the current context.
+	// The window is created always as not full screen because if it is
+	// created as full screen it not possible to revert it to windowed mode.
+	// At the end of this function, the window will be set to full screen if requested.
+	w.Window, err = glfw.CreateWindow(width, height, title, nil, nil)
+	if err != nil {
+		return err
+	}
+	glfw.WindowHint(glfw.Visible, glfw.True)
+
+	w.Window.SetPos(xpos, ypos)
+
+	glfw.DetachCurrentContext()
+
+	w.MakeContextCurrent()
+
+	w.Window.Show()
+
+	// Create OpenGL state
+	w.gls, err = gls.New()
+	if err != nil {
+		return err
+	}
+
+	// Compute and store scale
+	fbw, fbh := w.GetFramebufferSize()
+	w.scaleX = float64(fbw) / float64(width)
+	w.scaleY = float64(fbh) / float64(height)
+
+	// Create map for cursors
+	w.cursors = make(map[Cursor]*glfw.Cursor)
+	w.lastCursorKey = CursorLast
+
+	// Preallocate GLFW standard cursors
+	w.cursors[ArrowCursor] = glfw.CreateStandardCursor(glfw.ArrowCursor)
+	w.cursors[IBeamCursor] = glfw.CreateStandardCursor(glfw.IBeamCursor)
+	w.cursors[CrosshairCursor] = glfw.CreateStandardCursor(glfw.CrosshairCursor)
+	w.cursors[HandCursor] = glfw.CreateStandardCursor(glfw.HandCursor)
+	w.cursors[HResizeCursor] = glfw.CreateStandardCursor(glfw.HResizeCursor)
+	w.cursors[VResizeCursor] = glfw.CreateStandardCursor(glfw.VResizeCursor)
+
+	// Preallocate extra G3N standard cursors (diagonal resize cursors)
+	cursorDiag1Png := assets.MustAsset("cursors/diag1.png") // [/]
+	cursorDiag2Png := assets.MustAsset("cursors/diag2.png") // [\]
+	diag1Img, _, err := image.Decode(bytes.NewReader(cursorDiag1Png))
+	diag2Img, _, err := image.Decode(bytes.NewReader(cursorDiag2Png))
+	if err != nil {
+		return err
+	}
+	w.cursors[DiagResize1Cursor] = glfw.CreateCursor(diag1Img, 8, 8) // [/]
+	w.cursors[DiagResize2Cursor] = glfw.CreateCursor(diag2Img, 8, 8) // [\]
+
+	// Set up key callback to dispatch event
+	w.SetKeyCallback(func(x *glfw.Window, key glfw.Key, scancode int, action glfw.Action, mods glfw.ModifierKey) {
+		w.keyEv.Key = Key(key)
+		w.keyEv.Mods = ModifierKey(mods)
+		w.mods = w.keyEv.Mods
+		if action == glfw.Press {
+			w.Dispatch(OnKeyDown, &w.keyEv)
+		} else if action == glfw.Release {
+			w.Dispatch(OnKeyUp, &w.keyEv)
+		} else if action == glfw.Repeat {
+			w.Dispatch(OnKeyRepeat, &w.keyEv)
+		}
+	})
+
+	// Set up char callback to dispatch event
+	w.SetCharModsCallback(func(x *glfw.Window, char rune, mods glfw.ModifierKey) {
+		w.charEv.Char = char
+		w.charEv.Mods = ModifierKey(mods)
+		w.Dispatch(OnChar, &w.charEv)
+	})
+
+	// Set up mouse button callback to dispatch event
+	w.SetMouseButtonCallback(func(x *glfw.Window, button glfw.MouseButton, action glfw.Action, mods glfw.ModifierKey) {
+		xpos, ypos := x.GetCursorPos()
+		w.mouseEv.Button = MouseButton(button)
+		w.mouseEv.Mods = ModifierKey(mods)
+		w.mouseEv.Xpos = float32(xpos) //* float32(w.scaleX) TODO
+		w.mouseEv.Ypos = float32(ypos) //* float32(w.scaleY)
+		if action == glfw.Press {
+			w.Dispatch(OnMouseDown, &w.mouseEv)
+		} else if action == glfw.Release {
+			w.Dispatch(OnMouseUp, &w.mouseEv)
+		}
+	})
+
+	// Set up window size callback to dispatch event
+	w.SetSizeCallback(func(x *glfw.Window, width int, height int) {
+		fbw, fbh := x.GetFramebufferSize()
+		w.sizeEv.Width = width
+		w.sizeEv.Height = height
+		w.scaleX = float64(fbw) / float64(width)
+		w.scaleY = float64(fbh) / float64(height)
+		w.Dispatch(OnWindowSize, &w.sizeEv)
+	})
+
+	// Set up window position callback to dispatch event
+	w.SetPosCallback(func(x *glfw.Window, xpos int, ypos int) {
+		w.posEv.Xpos = xpos
+		w.posEv.Ypos = ypos
+		w.Dispatch(OnWindowPos, &w.posEv)
+	})
+
+	// Set up window focus callback to dispatch event
+	w.SetFocusCallback(func(x *glfw.Window, focused bool) {
+		w.focusEv.Focused = focused
+		w.Dispatch(OnWindowFocus, &w.focusEv)
+	})
+
+	// Set up window cursor position callback to dispatch event
+	w.SetCursorPosCallback(func(x *glfw.Window, xpos float64, ypos float64) {
+		w.cursorEv.Xpos = float32(xpos)
+		w.cursorEv.Ypos = float32(ypos)
+		w.cursorEv.Mods = w.mods
+		w.Dispatch(OnCursor, &w.cursorEv)
+	})
+
+	// Set up mouse wheel scroll callback to dispatch event
+	w.SetScrollCallback(func(x *glfw.Window, xoff float64, yoff float64) {
+		w.scrollEv.Xoffset = float32(xoff)
+		w.scrollEv.Yoffset = float32(yoff)
+		w.scrollEv.Mods = w.mods
+		w.Dispatch(OnScroll, &w.scrollEv)
+	})
+
+	win = w // Set singleton
+	return nil
+}
+
+// Init initializes the GlfwWindow singleton with the specified width, height, and title.
+func Init(width, height int, title string, hidden bool) error {
+
+	// Panic if already created
+	if win != nil {
+		panic(fmt.Errorf("can only call window.Init() once"))
+	}
+
+	// OpenGL functions must be executed in the same thread where
+	// the context was created (by wmgr.CreateWindow())
+	runtime.LockOSThread()
+
+	// Create wrapper window with dispatcher
+	w := new(GlfwWindow)
+	w.Dispatcher.Initialize()
+	var err error
+
+	if hidden {
+		glfw.WindowHint(glfw.Visible, glfw.False)
+	}
 
 	// Initialize GLFW
 	err = glfw.Init()
@@ -419,6 +591,16 @@ func (w *GlfwWindow) Destroy() {
 	w.Window.Destroy()
 	glfw.Terminate()
 	runtime.UnlockOSThread() // Important when using the execution tracer
+}
+
+// Sets the position of the window.
+func (w *GlfwWindow) GetPos() (x int, y int) {
+	return w.Window.GetPos()
+}
+
+// Sets the position of the window.
+func (w *GlfwWindow) SetPos(xpos, ypos int) {
+	w.Window.SetPos(4, 5)
 }
 
 // Scale returns this window's DPI scale factor (FramebufferSize / Size)

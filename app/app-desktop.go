@@ -37,11 +37,37 @@ func App(width, height int, title string) *Application {
 	}
 	a = new(Application)
 	// Initialize window
-	err := window.Init(width, height, title)
+	err := window.Init(width, height, title, false)
 	if err != nil {
 		panic(err)
 	}
 	a.IWindow = window.Get()
+	a.openDefaultAudioDevice()         // Set up audio
+	a.keyState = window.NewKeyState(a) // Create KeyState
+	// Create renderer and add default shaders
+	a.renderer = renderer.NewRenderer(a.Gls())
+	err = a.renderer.AddDefaultShaders()
+	if err != nil {
+		panic(fmt.Errorf("AddDefaultShaders:%v", err))
+	}
+	return a
+}
+
+// App returns the Application singleton, creating it the first time.
+func AppCustom(ac *Application, title string, w int, h int, xpos int, ypos int) *Application {
+
+	// Return singleton if already created
+	if a != nil {
+		return a
+	}
+	a = ac
+	// Initialize window
+	err := window.InitPos(w, h, xpos, ypos, title)
+	if err != nil {
+		panic(err)
+	}
+	a.IWindow = window.Get()
+
 	a.openDefaultAudioDevice()         // Set up audio
 	a.keyState = window.NewKeyState(a) // Create KeyState
 	// Create renderer and add default shaders
