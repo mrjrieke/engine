@@ -26,6 +26,14 @@ func NewFrustum(p0, p1, p2, p3, p4, p5 *Plane) *Frustum {
 	return f
 }
 
+// Get gets one of the frustum's planes
+func (f *Frustum) Get(i int) *Plane {
+	if i >= 0 && i < 6 {
+		return &f.planes[i]
+	}
+	return nil
+}
+
 // Set sets the frustum's planes
 func (f *Frustum) Set(p0, p1, p2, p3, p4, p5 *Plane) *Frustum {
 
