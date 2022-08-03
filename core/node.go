@@ -6,6 +6,7 @@ package core
 
 import (
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/g3n/engine/gls"
@@ -42,16 +43,16 @@ const (
 
 // Node represents an object in 3D space existing within a hierarchy.
 type Node struct {
-	Dispatcher                 // Embedded event dispatcher
-	inode          INode       // The INode associated with this Node
-	parent         INode       // Parent node
-	children       []INode     // Children nodes
-	name           string      // Optional node name
-	loaderID       string      // ID used by loader
-	visible        bool        // Whether the node is visible
-	matNeedsUpdate bool        // Whether the the local matrix needs to be updated because position or scale has changed
-	rotNeedsUpdate bool        // Whether the euler rotation and local matrix need to be updated because the quaternion has changed
-	userData       interface{} // Generic user data
+	Dispatcher                      // Embedded event dispatcher
+	inode          INode            // The INode associated with this Node
+	parent         INode            // Parent node
+	children       map[string]INode // Children nodes
+	name           string           // Optional node name
+	loaderID       string           // ID used by loader
+	visible        bool             // Whether the node is visible
+	matNeedsUpdate bool             // Whether the the local matrix needs to be updated because position or scale has changed
+	rotNeedsUpdate bool             // Whether the euler rotation and local matrix need to be updated because the quaternion has changed
+	userData       interface{}      // Generic user data
 
 	// Spatial properties
 	position   math32.Vector3    // Node position in 3D space (relative to parent)
@@ -80,7 +81,7 @@ func (n *Node) Init(inode INode) {
 
 	n.Dispatcher.Initialize()
 	n.inode = inode
-	n.children = make([]INode, 0)
+	n.children = map[string]INode{}
 	n.visible = true
 
 	// Initialize spatial properties
@@ -165,7 +166,7 @@ func (n *Node) Clone() INode {
 	clone.quaternion = n.quaternion
 	clone.matrix = n.matrix
 	clone.matrixWorld = n.matrixWorld
-	clone.children = make([]INode, 0)
+	clone.children = map[string]INode{}
 
 	// Clone children recursively
 	for _, child := range n.children {
@@ -293,8 +294,11 @@ func (n *Node) FindLoaderID(id string) INode {
 
 // Children returns the list of children.
 func (n *Node) Children() []INode {
-
-	return n.children
+	r := make([]INode, 0, len(n.children))
+	for _, v := range n.children {
+		r = append(r, v)
+	}
+	return r
 }
 
 // Add adds the specified node to the list of children and sets its parent pointer.
@@ -302,7 +306,7 @@ func (n *Node) Children() []INode {
 func (n *Node) Add(ichild INode) *Node {
 
 	setParent(n.GetINode(), ichild)
-	n.children = append(n.children, ichild)
+	n.children[ichild.GetNode().loaderID] = ichild
 	n.Dispatch(OnDescendant, nil)
 	return n
 }
@@ -310,18 +314,10 @@ func (n *Node) Add(ichild INode) *Node {
 // AddAt adds the specified node to the list of children at the specified index and sets its parent pointer.
 // If the specified node had a parent, the specified node is removed from the original parent's list of children.
 func (n *Node) AddAt(idx int, ichild INode) *Node {
-
-	// Validate position
-	if idx < 0 || idx > len(n.children) {
-		panic("Node.AddAt: invalid position")
-	}
-
 	setParent(n.GetINode(), ichild)
 
 	// Insert child in the specified position
-	n.children = append(n.children, nil)
-	copy(n.children[idx+1:], n.children[idx:])
-	n.children[idx] = ichild
+	n.children["g3ninternal-"+strconv.Itoa(idx)] = ichild
 
 	n.Dispatch(OnDescendant, nil)
 
@@ -351,14 +347,14 @@ func (n *Node) ChildAt(idx int) INode {
 	if idx < 0 || idx >= len(n.children) {
 		return nil
 	}
-	return n.children[idx]
+	return n.children["g3ninternal-"+strconv.Itoa(idx)]
 }
 
 // ChildIndex returns the index of the specified child (-1 if not found).
 func (n *Node) ChildIndex(ichild INode) int {
 
 	for idx := 0; idx < len(n.children); idx++ {
-		if n.children[idx] == ichild {
+		if n.children["g3ninternal-"+strconv.Itoa(idx)] == ichild {
 			return idx
 		}
 	}
@@ -406,16 +402,22 @@ func (n *Node) LowestCommonAncestor(other INode) INode {
 // Remove removes the specified INode from the list of children.
 // Returns true if found or false otherwise.
 func (n *Node) Remove(ichild INode) bool {
+	removeKey := ""
+	if ichild == nil {
+		return false
+	}
 
-	for pos, current := range n.children {
+	for key, current := range n.children {
 		if current == ichild {
-			copy(n.children[pos:], n.children[pos+1:])
-			n.children[len(n.children)-1] = nil
-			n.children = n.children[:len(n.children)-1]
+			removeKey = key
 			ichild.GetNode().parent = nil
 			n.Dispatch(OnDescendant, nil)
-			return true
+			break
 		}
+	}
+	if removeKey != "" {
+		delete(n.children, removeKey)
+		return true
 	}
 	return false
 }
@@ -428,13 +430,10 @@ func (n *Node) RemoveAt(idx int) INode {
 		panic("Node.RemoveAt: invalid position")
 	}
 
-	child := n.children[idx]
+	child := n.children["g3ninternal-"+strconv.Itoa(idx)]
 
 	// Remove child from children list
-	copy(n.children[idx:], n.children[idx+1:])
-	n.children[len(n.children)-1] = nil
-	n.children = n.children[:len(n.children)-1]
-
+	n.Remove(child)
 	n.Dispatch(OnDescendant, nil)
 
 	return child
@@ -450,7 +449,9 @@ func (n *Node) RemoveAll(recurs bool) {
 			ichild.GetNode().RemoveAll(recurs)
 		}
 	}
-	n.children = n.children[0:0]
+	for k := range n.children {
+		delete(n.children, k)
+	}
 }
 
 // DisposeChildren removes and disposes of all children.
@@ -465,7 +466,9 @@ func (n *Node) DisposeChildren(recurs bool) {
 		}
 		ichild.Dispose()
 	}
-	n.children = n.children[0:0]
+	for k := range n.children {
+		delete(n.children, k)
+	}
 }
 
 // SetPosition sets the position.
