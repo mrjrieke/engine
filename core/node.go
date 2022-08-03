@@ -5,6 +5,7 @@
 package core
 
 import (
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -306,6 +307,10 @@ func (n *Node) Children() []INode {
 func (n *Node) Add(ichild INode) *Node {
 
 	setParent(n.GetINode(), ichild)
+	if ichild.GetNode().loaderID == "" {
+		ichild.GetNode().loaderID = "g3ninternal-" + fmt.Sprintf("%p", ichild)
+	}
+
 	n.children[ichild.GetNode().loaderID] = ichild
 	n.Dispatch(OnDescendant, nil)
 	return n
