@@ -412,14 +412,19 @@ func (n *Node) Remove(ichild INode) bool {
 		return false
 	}
 
-	for key, current := range n.children {
-		if current == ichild {
-			removeKey = key
-			ichild.GetNode().parent = nil
-			n.Dispatch(OnDescendant, nil)
-			break
+	if n.children[ichild.GetNode().loaderID] != nil {
+		removeKey = ichild.GetNode().loaderID
+	} else {
+		for key, current := range n.children {
+			if current == ichild {
+				removeKey = key
+				ichild.GetNode().parent = nil
+				n.Dispatch(OnDescendant, nil)
+				break
+			}
 		}
 	}
+
 	if removeKey != "" {
 		delete(n.children, removeKey)
 		return true
