@@ -279,13 +279,14 @@ func (n *Node) FindLoaderID(id string) INode {
 	var finder func(parent INode, id string) INode
 	finder = func(parent INode, id string) INode {
 		pnode := parent.GetNode()
-		if pnode.loaderID == id {
-			return parent
-		}
-		for _, child := range pnode.children {
-			found := finder(child, id)
-			if found != nil {
-				return found
+		if found := pnode.children[id]; found != nil && found.GetNode().loaderID == id {
+			return found
+		} else {
+			for _, child := range pnode.children {
+				found := finder(child, id)
+				if found != nil {
+					return found
+				}
 			}
 		}
 		return nil
