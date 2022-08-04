@@ -438,12 +438,6 @@ func (n *Node) Remove(ichild INode) bool {
 
 // RemoveAt removes the child at the specified index.
 func (n *Node) RemoveAt(idx int) INode {
-
-	// Validate position
-	if idx < 0 || idx >= len(n.children) {
-		panic("Node.RemoveAt: invalid position")
-	}
-
 	child := n.children["g3ninternal-"+strconv.Itoa(idx)]
 
 	// Remove child from children list
